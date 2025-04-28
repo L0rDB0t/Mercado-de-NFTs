@@ -1,10 +1,13 @@
-// Polyfill seguro para almacenamiento
+// Polyfill seguro para almacenamiento con verificación de contexto
 const safeStorage = {
     get: (key) => {
         try {
-            return typeof window !== 'undefined' ? JSON.parse(localStorage.getItem(key)) : null;
-        } catch {
-            return null;
+            if (typeof window === 'undefined') return null;
+            const item = localStorage.getItem(key);
+            return item ? JSON.parse(item) : null;
+        } catch (e) {
+            console.warn("Error accediendo a localStorage:", e);
+            return safeStorage.memory[key] || null;
         }
     },
     set: (key, value) => {
@@ -13,24 +16,26 @@ const safeStorage = {
                 localStorage.setItem(key, JSON.stringify(value));
                 return true;
             }
-        } catch {
-            console.warn("Storage bloqueado, usando almacenamiento en memoria");
-            safeStorage.memoryStorage = safeStorage.memoryStorage || {};
-            safeStorage.memoryStorage[key] = value;
+        } catch (e) {
+            console.warn("No se pudo usar localStorage, usando memoria:", e);
+            safeStorage.memory = safeStorage.memory || {};
+            safeStorage.memory[key] = value;
             return false;
         }
     },
-    memoryStorage: {}
+    memory: {}
 };
 
-// Elementos UI
-const connectWalletBtn = document.getElementById('connectWallet');
-const walletBalanceSpan = document.getElementById('walletBalance');
-const networkNameSpan = document.getElementById('networkName');
-const nftGrid = document.getElementById('nftGrid');
-const mintForm = document.getElementById('mintForm');
-const nftModal = document.getElementById('nftModal') ? new bootstrap.Modal('#nftModal') : null;
-const transactionModal = document.getElementById('transactionModal') ? new bootstrap.Modal('#transactionModal') : null;
+// Elementos UI con verificación de existencia
+const UI = {
+    connectWalletBtn: document.getElementById('connectWallet'),
+    walletBalanceSpan: document.getElementById('walletBalance'),
+    networkNameSpan: document.getElementById('networkName'),
+    nftGrid: document.getElementById('nftGrid'),
+    mintForm: document.getElementById('mintForm'),
+    nftModal: document.getElementById('nftModal') ? new bootstrap.Modal('#nftModal') : null,
+    transactionModal: document.getElementById('transactionModal') ? new bootstrap.Modal('#transactionModal') : null
+};
 
 // Variables globales
 let nftContract;
@@ -38,15 +43,11 @@ let provider;
 let signer;
 let userAddress;
 
-// Configuración de Sepolia
+// Configuración de Sepolia mejorada
 const SEPOLIA_CONFIG = {
-    chainId: '0xaa36a7', // 11155111 en decimal
+    chainId: '0xaa36a7',
     chainName: 'Sepolia Testnet',
-    nativeCurrency: {
-        name: 'ETH',
-        symbol: 'ETH',
-        decimals: 18
-    },
+    nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
     rpcUrls: ['https://rpc.sepolia.org'],
     blockExplorerUrls: ['https://sepolia.etherscan.io']
 };
@@ -54,135 +55,107 @@ const SEPOLIA_CONFIG = {
 // ================== FUNCIONES MEJORADAS ================== //
 
 async function setupNetwork() {
-    if (!window.ethereum || !window.ethereum.isMetaMask) {
-        throw new Error("MetaMask no está instalado o no se detectó correctamente");
+    if (!window.ethereum) {
+        throw new Error("No se detectó un proveedor Ethereum. Instala MetaMask.");
     }
 
     try {
+        // Método universal para obtener chainId
         let chainId;
         try {
             chainId = await window.ethereum.request({ method: 'eth_chainId' });
         } catch (e) {
-            // Fallback para wallets que no soportan eth_chainId
+            console.warn("Método eth_chainId no soportado, usando net_version");
             const netVersion = await window.ethereum.request({ method: 'net_version' });
             chainId = `0x${parseInt(netVersion).toString(16)}`;
         }
 
-        if (chainId !== SEPOLIA_CONFIG.chainId) {
-            try {
+        // Si ya estamos en la red correcta
+        if (chainId === SEPOLIA_CONFIG.chainId) return true;
+
+        // Intenta cambiar de red
+        try {
+            await window.ethereum.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: SEPOLIA_CONFIG.chainId }]
+            });
+            return true;
+        } catch (switchError) {
+            // Manejo específico de errores
+            if (switchError.code === 4001) {
+                throw new Error("Cancelaste el cambio de red");
+            } else if (switchError.code === 4902) {
+                // Agregar red si no existe
                 await window.ethereum.request({
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: SEPOLIA_CONFIG.chainId }],
+                    method: 'wallet_addEthereumChain',
+                    params: [SEPOLIA_CONFIG]
                 });
-            } catch (switchError) {
-                if (switchError.code === 4902) {
-                    await window.ethereum.request({
-                        method: 'wallet_addEthereumChain',
-                        params: [SEPOLIA_CONFIG],
-                    });
-                } else {
-                    throw switchError;
-                }
+                return true;
+            } else {
+                throw new Error(`Por favor cambia manualmente a Sepolia (ID: ${SEPOLIA_CONFIG.chainId})`);
             }
         }
-        return true;
     } catch (error) {
-        console.error("Error configurando red:", error);
+        console.error("Error en setupNetwork:", error);
         throw error;
     }
 }
 
 async function connectWallet() {
     if (!window.ethereum) {
-        showError('Por favor instala MetaMask o usa un navegador con soporte para Ethereum');
+        showError("MetaMask no detectado. Por favor instálalo.");
         return false;
     }
 
     try {
-        await setupNetwork();
+        // Configurar red
+        try {
+            await setupNetwork();
+        } catch (networkError) {
+            showError(networkError.message);
+            return false;
+        }
+
+        // Solicitar cuentas
         const accounts = await window.ethereum.request({ 
             method: 'eth_requestAccounts' 
         }).catch(err => {
-            if (err.code === 4001) {
-                throw new Error("Cancelaste la conexión con MetaMask");
-            }
+            if (err.code === 4001) throw new Error("Cancelaste la conexión");
             throw err;
         });
 
-        if (!accounts || accounts.length === 0) {
-            throw new Error("No se obtuvieron cuentas de MetaMask");
-        }
+        if (!accounts?.length) throw new Error("No se obtuvieron cuentas");
 
+        // Configurar ethers.js
         provider = new ethers.providers.Web3Provider(window.ethereum);
         signer = provider.getSigner();
         userAddress = accounts[0];
         
-        if (!contractAddress || !contractABI) {
-            throw new Error("Configuración del contrato no encontrada");
+        // Verificar configuración del contrato
+        if (typeof contractAddress === 'undefined' || typeof contractABI === 'undefined') {
+            throw new Error("Configuración del contrato incompleta");
         }
         
         nftContract = new ethers.Contract(contractAddress, contractABI, signer);
         
+        // Actualizar UI
         updateWalletUI();
         await updateNetworkInfo();
         await loadNFTs();
         
         return true;
     } catch (error) {
-        console.error("Error conectando wallet:", error);
-        let errorMessage = "Error al conectar la wallet";
-        
-        if (error.message.includes("denied account access")) {
-            errorMessage = "Cancelaste la conexión con MetaMask";
-        } else if (error.message.includes("No se pudo configurar")) {
-            errorMessage = error.message;
-        } else if (error.code === -32002) {
-            errorMessage = "Ya hay una solicitud pendiente en MetaMask";
-        }
-        
-        showError(errorMessage);
+        console.error("Error en connectWallet:", error);
+        showError(error.message.includes("Cancelaste") ? error.message : 
+                 "Error al conectar. Por favor inténtalo de nuevo.");
         return false;
-    }
-}
-
-function handleConnectionError(error) {
-    let message = "Error conectando la wallet";
-    
-    if (error.code === 4001) {
-        message = "Cancelaste la conexión con MetaMask";
-    } else if (error.code === -32002) {
-        message = "Ya hay una solicitud pendiente en MetaMask";
-    } else if (error.message.includes("Network")) {
-        message = "Por favor cambia a la red Sepolia en MetaMask";
-    } else {
-        message = error.message || message;
-    }
-    
-    showError(message);
-}
-
-function updateWalletUI() {
-    if (!connectWalletBtn) return;
-
-    if (userAddress) {
-        connectWalletBtn.innerHTML = `
-            <i class="fas fa-check-circle me-2"></i>
-            ${shortenAddress(userAddress)}
-        `;
-        connectWalletBtn.classList.add('connected');
-    } else {
-        connectWalletBtn.innerHTML = `
-            <i class="fas fa-wallet me-2"></i>
-            Conectar Wallet
-        `;
-        connectWalletBtn.classList.remove('connected');
     }
 }
 
 // ================== FUNCIONES PRINCIPALES ================== //
 
 async function loadNFTs() {
-    if (!nftContract) return;
+    if (!nftContract || !UI.nftGrid) return;
 
     try {
         showLoadingState();
@@ -218,28 +191,18 @@ async function loadNFTs() {
 async function fetchNFTMetadata(uri) {
     try {
         const response = await fetch(uri);
+        if (!response.ok) throw new Error("Error en la respuesta");
         return await response.json();
     } catch (error) {
         console.warn("Error cargando metadatos:", error);
-        return {};
+        return { name: "NFT", description: "", image: "https://via.placeholder.com/300" };
     }
 }
 
 function renderNFTs(nfts) {
-    if (!nftGrid) return;
+    if (!UI.nftGrid) return;
 
-    if (nfts.length === 0) {
-        nftGrid.innerHTML = `
-            <div class="col-12 text-center py-5">
-                <i class="fas fa-box-open fa-3x mb-3 text-muted"></i>
-                <h4>No hay NFTs disponibles</h4>
-                <p class="text-muted">Sé el primero en crear un NFT</p>
-            </div>
-        `;
-        return;
-    }
-
-    nftGrid.innerHTML = nfts.map(nft => `
+    UI.nftGrid.innerHTML = nfts.length ? nfts.map(nft => `
         <div class="col-md-4 col-lg-3 mb-4">
             <div class="nft-card h-100">
                 <img src="${nft.image}" alt="${nft.name}" class="nft-img" 
@@ -264,8 +227,15 @@ function renderNFTs(nfts) {
                 </div>
             </div>
         </div>
-    `).join('');
+    `).join('') : `
+        <div class="col-12 text-center py-5">
+            <i class="fas fa-box-open fa-3x mb-3 text-muted"></i>
+            <h4>No hay NFTs disponibles</h4>
+            <p class="text-muted">Sé el primero en crear un NFT</p>
+        </div>
+    `;
 
+    // Event listeners para botones de compra
     document.querySelectorAll('.buy-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
@@ -276,36 +246,43 @@ function renderNFTs(nfts) {
     });
 }
 
-async function buyNFT(tokenId, price) {
-    if (!userAddress) {
-        showError("Conecta tu wallet primero");
-        return;
-    }
+// ================== FUNCIONES AUXILIARES ================== //
 
+function updateWalletUI() {
+    if (!UI.connectWalletBtn) return;
+
+    UI.connectWalletBtn.innerHTML = userAddress ? `
+        <i class="fas fa-check-circle me-2"></i>
+        ${shortenAddress(userAddress)}
+    ` : `
+        <i class="fas fa-wallet me-2"></i>
+        Conectar Wallet
+    `;
+
+    UI.connectWalletBtn.classList.toggle('connected', !!userAddress);
+}
+
+async function updateNetworkInfo() {
+    if (!provider || !userAddress || !UI.walletBalanceSpan || !UI.networkNameSpan) return;
+    
     try {
-        showTransactionModal("Procesando compra...");
-        const tx = await nftContract.buyNFT(tokenId, {
-            value: ethers.utils.parseEther(price)
-        });
+        const [balance, network] = await Promise.all([
+            provider.getBalance(userAddress),
+            provider.getNetwork()
+        ]);
         
-        await tx.wait();
-        showTransactionModal("¡Compra exitosa!", tx.hash);
-        setTimeout(() => {
-            transactionModal.hide();
-            loadNFTs();
-        }, 2000);
+        UI.walletBalanceSpan.textContent = parseFloat(ethers.utils.formatEther(balance)).toFixed(4);
+        UI.networkNameSpan.textContent = network.name === 'unknown' ? 'Sepolia' : network.name;
     } catch (error) {
-        console.error("Error comprando NFT:", error);
-        showError(`Error al comprar: ${error.reason || error.message}`);
-        transactionModal.hide();
+        console.error("Error actualizando info de red:", error);
     }
 }
 
-// ================== FUNCIONES AUXILIARES ================== //
+// ================== MANEJO DE UI ================== //
 
 function showLoadingState() {
-    if (nftGrid) {
-        nftGrid.innerHTML = `
+    if (UI.nftGrid) {
+        UI.nftGrid.innerHTML = `
             <div class="col-12 text-center py-5">
                 <div class="spinner-border text-primary" role="status">
                     <span class="visually-hidden">Cargando...</span>
@@ -317,8 +294,8 @@ function showLoadingState() {
 }
 
 function showErrorState(message) {
-    if (nftGrid) {
-        nftGrid.innerHTML = `
+    if (UI.nftGrid) {
+        UI.nftGrid.innerHTML = `
             <div class="col-12 text-center py-5">
                 <i class="fas fa-exclamation-triangle fa-3x text-danger mb-3"></i>
                 <h4>${message}</h4>
@@ -331,6 +308,8 @@ function showErrorState(message) {
 }
 
 function showTransactionModal(message, txHash = null) {
+    if (!UI.transactionModal) return;
+
     const modalBody = document.querySelector('#transactionModal .modal-body');
     if (modalBody) {
         modalBody.innerHTML = `
@@ -347,98 +326,101 @@ function showTransactionModal(message, txHash = null) {
                 ` : ''}
             </div>
         `;
-        transactionModal.show();
+        UI.transactionModal.show();
     }
 }
 
 function showError(message) {
+    const existingAlerts = document.querySelectorAll('.global-alert');
+    existingAlerts.forEach(alert => alert.remove());
+
     const alertDiv = document.createElement('div');
-    alertDiv.className = 'alert alert-danger position-fixed top-0 end-0 m-3';
+    alertDiv.className = 'global-alert alert alert-danger position-fixed top-0 end-0 m-3';
     alertDiv.style.zIndex = '1100';
     alertDiv.innerHTML = `
         <i class="fas fa-exclamation-circle me-2"></i>
         ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     `;
     document.body.appendChild(alertDiv);
-    setTimeout(() => alertDiv.remove(), 5000);
+
+    setTimeout(() => {
+        alertDiv.classList.add('fade');
+        setTimeout(() => alertDiv.remove(), 300);
+    }, 5000);
 }
 
 function shortenAddress(address) {
-    if (!address) return '';
-    return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
-}
-
-async function updateNetworkInfo() {
-    if (!provider || !userAddress || !walletBalanceSpan || !networkNameSpan) return;
-    
-    try {
-        const [balance, network] = await Promise.all([
-            provider.getBalance(userAddress),
-            provider.getNetwork()
-        ]);
-        
-        walletBalanceSpan.textContent = parseFloat(ethers.utils.formatEther(balance)).toFixed(4);
-        networkNameSpan.textContent = network.name === 'unknown' ? 'Sepolia' : network.name;
-    } catch (error) {
-        console.error("Error actualizando info de red:", error);
-    }
+    return address ? `${address.substring(0, 6)}...${address.substring(address.length - 4)}` : '';
 }
 
 // ================== INICIALIZACIÓN ================== //
 
 function setupEventListeners() {
-    if (connectWalletBtn) {
-        connectWalletBtn.addEventListener('click', connectWallet);
+    if (UI.connectWalletBtn) {
+        UI.connectWalletBtn.addEventListener('click', connectWallet);
     }
 
-    if (mintForm) {
-        mintForm.addEventListener('submit', async (e) => {
+    if (UI.mintForm) {
+        UI.mintForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             if (!userAddress) {
                 showError("Conecta tu wallet primero");
                 return;
             }
 
-            const name = document.getElementById('nftName').value;
-            const description = document.getElementById('nftDescription').value;
-            const imageUrl = document.getElementById('nftImage').value;
-            const price = document.getElementById('nftPrice').value;
+            const formData = {
+                name: document.getElementById('nftName')?.value,
+                description: document.getElementById('nftDescription')?.value,
+                imageUrl: document.getElementById('nftImage')?.value,
+                price: document.getElementById('nftPrice')?.value
+            };
+
+            if (!formData.name || !formData.price || !formData.imageUrl) {
+                showError("Por favor completa todos los campos requeridos");
+                return;
+            }
 
             try {
                 showTransactionModal("Creando NFT...");
-                const tokenURI = JSON.stringify({ name, description, image: imageUrl });
+                const tokenURI = JSON.stringify({
+                    name: formData.name,
+                    description: formData.description || "",
+                    image: formData.imageUrl
+                });
+                
                 const tx = await nftContract.mintNFT(
                     tokenURI, 
-                    ethers.utils.parseEther(price),
+                    ethers.utils.parseEther(formData.price),
                     { value: ethers.utils.parseEther("0.001") }
                 );
 
                 await tx.wait();
                 showTransactionModal("¡NFT creado exitosamente!", tx.hash);
-                mintForm.reset();
+                UI.mintForm.reset();
+                
                 setTimeout(() => {
-                    transactionModal.hide();
+                    if (UI.transactionModal) UI.transactionModal.hide();
                     loadNFTs();
                 }, 2000);
             } catch (error) {
                 console.error("Error creando NFT:", error);
-                showError(`Error al crear NFT: ${error.reason || error.message}`);
-                transactionModal.hide();
+                showError(error.reason || error.message || "Error al crear NFT");
+                if (UI.transactionModal) UI.transactionModal.hide();
             }
         });
     }
 }
 
-async function init() {
+async function initApp() {
     try {
         // Verificar dependencias
         if (typeof ethers === 'undefined') {
-            throw new Error("ethers.js no está cargado");
+            throw new Error("La biblioteca ethers.js no está cargada");
         }
 
         if (typeof contractAddress === 'undefined' || typeof contractABI === 'undefined') {
-            throw new Error("Configuración del contrato no encontrada");
+            throw new Error("La configuración del contrato no está completa");
         }
 
         // Verificar conexión existente
@@ -457,25 +439,28 @@ async function init() {
         setupEventListeners();
         await loadNFTs();
     } catch (error) {
-        console.error("Error inicializando:", error);
-        showError("Error al iniciar la aplicación: " + error.message);
+        console.error("Error inicializando la aplicación:", error);
+        showError(error.message || "Error al iniciar la aplicación");
     }
 }
 
-// Iniciar la aplicación cuando el DOM esté listo
+// Inicialización segura
 if (document.readyState === 'complete') {
-    init();
+    initApp();
 } else {
-    window.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', initApp);
 }
 
-// Escuchar cambios en MetaMask
+// Escuchadores de eventos de MetaMask
 if (window.ethereum) {
     window.ethereum.on('accountsChanged', (accounts) => {
         userAddress = accounts[0] || null;
         updateWalletUI();
-        if (!accounts.length) showErrorState("Wallet desconectada");
-        else loadNFTs().catch(console.error);
+        if (!accounts.length) {
+            showErrorState("Wallet desconectada");
+        } else {
+            loadNFTs().catch(e => console.error("Error recargando NFTs:", e));
+        }
     });
 
     window.ethereum.on('chainChanged', () => {
