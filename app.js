@@ -1,3 +1,5 @@
+const { fetchEnsAddress } = require("wagmi/actions");
+
 // Configuración del contrato
 const contractAddress = "0x6aa8d26ecc5f79261f1c4b2de4a6510ac945424d";
 const contractABI = [
@@ -1143,4 +1145,113 @@ if (window.ethereum) {
     window.ethereum.on('chainChanged', () => {
         window.location.reload();
     });
+}
+// Función mejorada para conectar wallet
+async function connectWallet() {
+    if (!window.ethereum) {
+        alert('Por favor instala MetaMask desde https://metamask.io/');
+        return;
+    }
+
+    try {
+        // Solicitar acceso a las cuentas
+        const accounts = await window.ethereum.request({ 
+            method: 'eth_requestAccounts' 
+        });
+        
+        userAddress = accounts[0];
+        updateWalletUI();
+        
+        // Inicializar el provider y contrato
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        signer = provider.getSigner();
+        nftContract = new ethers.Contract(contractAddress, contractABI, signer);
+        
+        // Actualizar información de red
+        await updateNetworkInfo();
+        
+        // Cargar NFTs
+        await loadNFTs();
+        
+        console.log("Wallet conectada:", userAddress);
+        
+    } catch (error) {
+        console.error("Error al conectar wallet:", error);
+        
+        // Mensajes de error específicos
+        if (error.code === 4001) {
+            alert("Cancelaste la conexión. Por favor conecta tu wallet para continuar.");
+        } else {
+            alert(`Error al conectar: ${error.message}`);
+        }
+    }
+}
+
+// Función mejorada para actualizar la UI
+function updateWalletUI() {
+    const walletBtn = document.getElementById('connectWallet');
+    if (userAddress) {
+        walletBtn.innerHTML = `<i class="fas fa-check-circle me-2"></i>${userAddress.substring(0, 6)}...${userAddress.substring(38)}`;
+        walletBtn.classList.add('connected');
+    } else {
+        walletBtn.innerHTML = '<i class="fas fa-wallet me-2"></i>Conectar Wallet';
+        walletBtn.classList.remove('connected');
+    }
+}
+// Verificar y cambiar a Sepolia si es necesario
+async function checkNetwork() {
+    const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+    const sepoliaChainId = '0xaa36a7'; // ID de Sepolia
+    
+    if (chainId !== sepoliaChainId) {
+        try {
+            await window.ethereum.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: sepoliaChainId }],
+            });
+        } catch (error) {
+            // Si la red no está añadida, agregarla
+            if (error.code === 4902) {
+                await addSepoliaNetwork();
+            }
+        }
+    }
+}
+
+// Añadir red Sepolia a MetaMask
+async function addSepoliaNetwork() {
+    try {
+        await window.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+                chainId: '0xaa36a7',
+                chainName: 'Sepolia',
+                nativeCurrency: {
+                    name: 'ETH',
+                    symbol: 'ETH',
+                    decimals: 18
+                },
+                rpcUrls: ['https://sepolia.infura.io/v3/'],
+                blockExplorerUrls: ['https://sepolia.etherscan.io/']
+            }]
+        });
+    } catch (error) {
+        console.error("Error al añadir red Sepolia:", error);
+    }
+}
+
+// Modifica la función connectWallet para incluir la verificación de red
+async function connectWallet() {
+    if (!window.ethereum) {
+        alert('Por favor instala MetaMask');
+        return;
+    }
+
+    try {
+        await checkNetwork(); // <-- Verificar red primero
+        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        // ... resto del código
+    } catch (error) {
+        // ... manejo de errores
+    }
 }
