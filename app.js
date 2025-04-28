@@ -1,31 +1,36 @@
-// Verificación inicial del entorno
-if (typeof window === 'undefined') {
-    throw new Error("Este código debe ejecutarse en el navegador");
-}
+// Polyfill seguro para almacenamiento
+const safeStorage = {
+    get: (key) => {
+        try {
+            return typeof window !== 'undefined' ? JSON.parse(localStorage.getItem(key)) : null;
+        } catch {
+            return null;
+        }
+    },
+    set: (key, value) => {
+        try {
+            if (typeof window !== 'undefined') {
+                localStorage.setItem(key, JSON.stringify(value));
+                return true;
+            }
+        } catch {
+            console.warn("Storage bloqueado, usando almacenamiento en memoria");
+            safeStorage.memoryStorage = safeStorage.memoryStorage || {};
+            safeStorage.memoryStorage[key] = value;
+            return false;
+        }
+    },
+    memoryStorage: {}
+};
 
-// Verificación de dependencias
-if (typeof ethers === 'undefined') {
-    throw new Error("ethers.js no está cargado correctamente");
-}
-if (typeof bootstrap === 'undefined') {
-    console.warn("Bootstrap no está cargado correctamente");
-}
-
-// Elementos UI - con verificaciones de existencia
+// Elementos UI
 const connectWalletBtn = document.getElementById('connectWallet');
 const walletBalanceSpan = document.getElementById('walletBalance');
 const networkNameSpan = document.getElementById('networkName');
 const nftGrid = document.getElementById('nftGrid');
 const mintForm = document.getElementById('mintForm');
-
-// Inicialización segura de modales
-let nftModal, transactionModal;
-try {
-    nftModal = document.getElementById('nftModal') ? new bootstrap.Modal('#nftModal') : null;
-    transactionModal = document.getElementById('transactionModal') ? new bootstrap.Modal('#transactionModal') : null;
-} catch (e) {
-    console.error("Error inicializando modales:", e);
-}
+const nftModal = document.getElementById('nftModal') ? new bootstrap.Modal('#nftModal') : null;
+const transactionModal = document.getElementById('transactionModal') ? new bootstrap.Modal('#transactionModal') : null;
 
 // Variables globales
 let nftContract;
@@ -46,15 +51,23 @@ const SEPOLIA_CONFIG = {
     blockExplorerUrls: ['https://sepolia.etherscan.io']
 };
 
-// ================== FUNCIONES DE CONEXIÓN MEJORADAS ================== //
+// ================== FUNCIONES MEJORADAS ================== //
 
 async function setupNetwork() {
-    if (!window.ethereum) {
-        throw new Error("MetaMask no instalado");
+    if (!window.ethereum || !window.ethereum.isMetaMask) {
+        throw new Error("MetaMask no está instalado o no se detectó correctamente");
     }
-    
+
     try {
-        const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+        let chainId;
+        try {
+            chainId = await window.ethereum.request({ method: 'eth_chainId' });
+        } catch (e) {
+            // Fallback para wallets que no soportan eth_chainId
+            const netVersion = await window.ethereum.request({ method: 'net_version' });
+            chainId = `0x${parseInt(netVersion).toString(16)}`;
+        }
+
         if (chainId !== SEPOLIA_CONFIG.chainId) {
             try {
                 await window.ethereum.request({
@@ -81,7 +94,7 @@ async function setupNetwork() {
 
 async function connectWallet() {
     if (!window.ethereum) {
-        showError('Por favor instala MetaMask');
+        showError('Por favor instala MetaMask o usa un navegador con soporte para Ethereum');
         return false;
     }
 
@@ -89,15 +102,23 @@ async function connectWallet() {
         await setupNetwork();
         const accounts = await window.ethereum.request({ 
             method: 'eth_requestAccounts' 
+        }).catch(err => {
+            if (err.code === 4001) {
+                throw new Error("Cancelaste la conexión con MetaMask");
+            }
+            throw err;
         });
-        
+
+        if (!accounts || accounts.length === 0) {
+            throw new Error("No se obtuvieron cuentas de MetaMask");
+        }
+
         provider = new ethers.providers.Web3Provider(window.ethereum);
         signer = provider.getSigner();
         userAddress = accounts[0];
         
-        // Verificación adicional del contrato
-        if (typeof contractAddress === 'undefined' || typeof contractABI === 'undefined') {
-            throw new Error("Configuración del contrato incompleta");
+        if (!contractAddress || !contractABI) {
+            throw new Error("Configuración del contrato no encontrada");
         }
         
         nftContract = new ethers.Contract(contractAddress, contractABI, signer);
@@ -109,7 +130,17 @@ async function connectWallet() {
         return true;
     } catch (error) {
         console.error("Error conectando wallet:", error);
-        handleConnectionError(error);
+        let errorMessage = "Error al conectar la wallet";
+        
+        if (error.message.includes("denied account access")) {
+            errorMessage = "Cancelaste la conexión con MetaMask";
+        } else if (error.message.includes("No se pudo configurar")) {
+            errorMessage = error.message;
+        } else if (error.code === -32002) {
+            errorMessage = "Ya hay una solicitud pendiente en MetaMask";
+        }
+        
+        showError(errorMessage);
         return false;
     }
 }
@@ -133,23 +164,25 @@ function handleConnectionError(error) {
 function updateWalletUI() {
     if (!connectWalletBtn) return;
 
-    const shortenedAddress = userAddress 
-        ? `${userAddress.substring(0, 6)}...${userAddress.substring(userAddress.length - 4)}`
-        : '';
-    
-    connectWalletBtn.innerHTML = userAddress
-        ? `<i class="fas fa-check-circle me-2"></i>${shortenedAddress}`
-        : `<i class="fas fa-wallet me-2"></i>Conectar Wallet`;
-        
-    userAddress 
-        ? connectWalletBtn.classList.add('connected')
-        : connectWalletBtn.classList.remove('connected');
+    if (userAddress) {
+        connectWalletBtn.innerHTML = `
+            <i class="fas fa-check-circle me-2"></i>
+            ${shortenAddress(userAddress)}
+        `;
+        connectWalletBtn.classList.add('connected');
+    } else {
+        connectWalletBtn.innerHTML = `
+            <i class="fas fa-wallet me-2"></i>
+            Conectar Wallet
+        `;
+        connectWalletBtn.classList.remove('connected');
+    }
 }
 
-// ================== FUNCIONES PRINCIPALES CON MEJOR MANEJO DE ERRORES ================== //
+// ================== FUNCIONES PRINCIPALES ================== //
 
 async function loadNFTs() {
-    if (!nftContract || !nftGrid) return;
+    if (!nftContract) return;
 
     try {
         showLoadingState();
@@ -185,7 +218,6 @@ async function loadNFTs() {
 async function fetchNFTMetadata(uri) {
     try {
         const response = await fetch(uri);
-        if (!response.ok) throw new Error("Error en la respuesta");
         return await response.json();
     } catch (error) {
         console.warn("Error cargando metadatos:", error);
@@ -196,42 +228,44 @@ async function fetchNFTMetadata(uri) {
 function renderNFTs(nfts) {
     if (!nftGrid) return;
 
-    nftGrid.innerHTML = nfts.length === 0
-        ? `
+    if (nfts.length === 0) {
+        nftGrid.innerHTML = `
             <div class="col-12 text-center py-5">
                 <i class="fas fa-box-open fa-3x mb-3 text-muted"></i>
                 <h4>No hay NFTs disponibles</h4>
                 <p class="text-muted">Sé el primero en crear un NFT</p>
             </div>
-        `
-        : nfts.map(nft => `
-            <div class="col-md-4 col-lg-3 mb-4">
-                <div class="nft-card h-100">
-                    <img src="${nft.image}" alt="${nft.name}" class="nft-img" 
-                         onerror="this.src='https://via.placeholder.com/300'">
-                    <div class="p-3 d-flex flex-column h-100">
-                        <h5 class="mb-2">${nft.name}</h5>
-                        <p class="text-muted flex-grow-1">${nft.description.substring(0, 100)}${nft.description.length > 100 ? '...' : ''}</p>
-                        <div class="mt-auto">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span class="price-tag">${parseFloat(nft.price).toFixed(3)} ETH</span>
-                                ${nft.forSale 
-                                    ? `<button class="btn btn-sm btn-primary buy-btn" data-id="${nft.id}">
-                                        <i class="fas fa-shopping-cart me-1"></i> Comprar
-                                      </button>` 
-                                    : `<span class="badge bg-secondary">Vendido</span>`
-                                }
-                            </div>
-                            <small class="text-muted d-block">
-                                <i class="fas fa-user me-1"></i>${shortenAddress(nft.owner)}
-                            </small>
+        `;
+        return;
+    }
+
+    nftGrid.innerHTML = nfts.map(nft => `
+        <div class="col-md-4 col-lg-3 mb-4">
+            <div class="nft-card h-100">
+                <img src="${nft.image}" alt="${nft.name}" class="nft-img" 
+                     onerror="this.src='https://via.placeholder.com/300'">
+                <div class="p-3 d-flex flex-column h-100">
+                    <h5 class="mb-2">${nft.name}</h5>
+                    <p class="text-muted flex-grow-1">${nft.description.substring(0, 100)}${nft.description.length > 100 ? '...' : ''}</p>
+                    <div class="mt-auto">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="price-tag">${parseFloat(nft.price).toFixed(3)} ETH</span>
+                            ${nft.forSale ? 
+                                `<button class="btn btn-sm btn-primary buy-btn" data-id="${nft.id}">
+                                    <i class="fas fa-shopping-cart me-1"></i> Comprar
+                                </button>` : 
+                                `<span class="badge bg-secondary">Vendido</span>`
+                            }
                         </div>
+                        <small class="text-muted d-block">
+                            <i class="fas fa-user me-1"></i>${shortenAddress(nft.owner)}
+                        </small>
                     </div>
                 </div>
             </div>
-        `).join('');
+        </div>
+    `).join('');
 
-    // Agregar event listeners de manera segura
     document.querySelectorAll('.buy-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
@@ -242,7 +276,32 @@ function renderNFTs(nfts) {
     });
 }
 
-// ================== FUNCIONES AUXILIARES MEJORADAS ================== //
+async function buyNFT(tokenId, price) {
+    if (!userAddress) {
+        showError("Conecta tu wallet primero");
+        return;
+    }
+
+    try {
+        showTransactionModal("Procesando compra...");
+        const tx = await nftContract.buyNFT(tokenId, {
+            value: ethers.utils.parseEther(price)
+        });
+        
+        await tx.wait();
+        showTransactionModal("¡Compra exitosa!", tx.hash);
+        setTimeout(() => {
+            transactionModal.hide();
+            loadNFTs();
+        }, 2000);
+    } catch (error) {
+        console.error("Error comprando NFT:", error);
+        showError(`Error al comprar: ${error.reason || error.message}`);
+        transactionModal.hide();
+    }
+}
+
+// ================== FUNCIONES AUXILIARES ================== //
 
 function showLoadingState() {
     if (nftGrid) {
@@ -263,7 +322,7 @@ function showErrorState(message) {
             <div class="col-12 text-center py-5">
                 <i class="fas fa-exclamation-triangle fa-3x text-danger mb-3"></i>
                 <h4>${message}</h4>
-                <button class="btn btn-primary mt-3" onclick="window.location.reload()">
+                <button class="btn btn-primary mt-3" onclick="location.reload()">
                     <i class="fas fa-sync-alt me-2"></i> Reintentar
                 </button>
             </div>
@@ -272,8 +331,6 @@ function showErrorState(message) {
 }
 
 function showTransactionModal(message, txHash = null) {
-    if (!transactionModal) return;
-    
     const modalBody = document.querySelector('#transactionModal .modal-body');
     if (modalBody) {
         modalBody.innerHTML = `
@@ -295,24 +352,21 @@ function showTransactionModal(message, txHash = null) {
 }
 
 function showError(message) {
-    try {
-        const alertDiv = document.createElement('div');
-        alertDiv.className = 'alert alert-danger position-fixed top-0 end-0 m-3';
-        alertDiv.style.zIndex = '1100';
-        alertDiv.innerHTML = `
-            <i class="fas fa-exclamation-circle me-2"></i>
-            ${message}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        `;
-        document.body.appendChild(alertDiv);
-        setTimeout(() => alertDiv.remove(), 5000);
-    } catch (e) {
-        console.error("Error mostrando mensaje:", e);
-    }
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-danger position-fixed top-0 end-0 m-3';
+    alertDiv.style.zIndex = '1100';
+    alertDiv.innerHTML = `
+        <i class="fas fa-exclamation-circle me-2"></i>
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    document.body.appendChild(alertDiv);
+    setTimeout(() => alertDiv.remove(), 5000);
 }
 
 function shortenAddress(address) {
-    return address ? `${address.substring(0, 6)}...${address.substring(address.length - 4)}` : '';
+    if (!address) return '';
+    return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
 }
 
 async function updateNetworkInfo() {
@@ -331,36 +385,13 @@ async function updateNetworkInfo() {
     }
 }
 
-// ================== MANEJO SEGURO DE LOCALSTORAGE ================== //
-
-function safeLocalStorageGet(key) {
-    try {
-        return typeof window !== 'undefined' ? localStorage.getItem(key) : null;
-    } catch (e) {
-        console.warn("Error accediendo a localStorage:", e);
-        return null;
-    }
-}
-
-function safeLocalStorageSet(key, value) {
-    try {
-        if (typeof window !== 'undefined') {
-            localStorage.setItem(key, value);
-        }
-    } catch (e) {
-        console.warn("Error guardando en localStorage:", e);
-    }
-}
-
-// ================== INICIALIZACIÓN MEJORADA ================== //
+// ================== INICIALIZACIÓN ================== //
 
 function setupEventListeners() {
-    // Conectar wallet
     if (connectWalletBtn) {
         connectWalletBtn.addEventListener('click', connectWallet);
     }
 
-    // Mint form
     if (mintForm) {
         mintForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -369,15 +400,10 @@ function setupEventListeners() {
                 return;
             }
 
-            const name = document.getElementById('nftName')?.value;
-            const description = document.getElementById('nftDescription')?.value;
-            const imageUrl = document.getElementById('nftImage')?.value;
-            const price = document.getElementById('nftPrice')?.value;
-
-            if (!name || !description || !imageUrl || !price) {
-                showError("Por favor completa todos los campos");
-                return;
-            }
+            const name = document.getElementById('nftName').value;
+            const description = document.getElementById('nftDescription').value;
+            const imageUrl = document.getElementById('nftImage').value;
+            const price = document.getElementById('nftPrice').value;
 
             try {
                 showTransactionModal("Creando NFT...");
@@ -406,6 +432,15 @@ function setupEventListeners() {
 
 async function init() {
     try {
+        // Verificar dependencias
+        if (typeof ethers === 'undefined') {
+            throw new Error("ethers.js no está cargado");
+        }
+
+        if (typeof contractAddress === 'undefined' || typeof contractABI === 'undefined') {
+            throw new Error("Configuración del contrato no encontrada");
+        }
+
         // Verificar conexión existente
         if (window.ethereum) {
             const accounts = await window.ethereum.request({ method: 'eth_accounts' });
@@ -413,40 +448,34 @@ async function init() {
                 provider = new ethers.providers.Web3Provider(window.ethereum);
                 signer = provider.getSigner();
                 userAddress = accounts[0];
-                
-                if (typeof contractAddress !== 'undefined' && typeof contractABI !== 'undefined') {
-                    nftContract = new ethers.Contract(contractAddress, contractABI, signer);
-                    updateWalletUI();
-                    await updateNetworkInfo();
-                }
+                nftContract = new ethers.Contract(contractAddress, contractABI, signer);
+                updateWalletUI();
+                await updateNetworkInfo();
             }
         }
 
         setupEventListeners();
         await loadNFTs();
     } catch (error) {
-        console.error("Error inicializando la app:", error);
-        showError("Error al iniciar la aplicación");
+        console.error("Error inicializando:", error);
+        showError("Error al iniciar la aplicación: " + error.message);
     }
 }
 
-// Iniciar la aplicación de manera segura
-if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    setTimeout(init, 1);
+// Iniciar la aplicación cuando el DOM esté listo
+if (document.readyState === 'complete') {
+    init();
 } else {
-    document.addEventListener('DOMContentLoaded', init);
+    window.addEventListener('DOMContentLoaded', init);
 }
 
-// Escuchar cambios en MetaMask de manera segura
+// Escuchar cambios en MetaMask
 if (window.ethereum) {
     window.ethereum.on('accountsChanged', (accounts) => {
         userAddress = accounts[0] || null;
         updateWalletUI();
-        if (!accounts.length) {
-            showErrorState("Wallet desconectada");
-        } else {
-            loadNFTs().catch(console.error);
-        }
+        if (!accounts.length) showErrorState("Wallet desconectada");
+        else loadNFTs().catch(console.error);
     });
 
     window.ethereum.on('chainChanged', () => {
