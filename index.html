@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mercado NFT prueba - Mercado de NFTs en Sepolia</title>
+    <style>
+        :root {
+            --primary: #9d9cad;
+            --secondary: #1c6d8f;
+            --dark: #1a1a2e;
+            --light: #170e4d;
+            --success: #28a745;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: var(--dark);
+            color: var(--light);
+        }
+        
+        header {
+            background:#a1e5f5;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(41, 31, 31, 0.1);
+        }
+        
+        .logo {
+            font-size: 1.8rem;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+        }
+        
+        .logo img {
+            height: 40px;
+            margin-right: 10px;
+        }
+        
+        .connect-wallet {
+            background-color: white;
+            color: var(--primary);
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 25px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .connect-wallet:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        
+        .wallet-connected {
+            background-color: var(--success);
+            color: white;
+        }
+        
+        main {
+            padding: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 2rem;
+            font-size: 2.5rem;
+            background: linear-gradient(to right, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .nft-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 2rem;
+        }
+        
+        .nft-card {
+            background-color: #16213e;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            transition: transform 0.3s;
+        }
+        
+        .nft-card:hover {
+            transform: translateY(-10px);
+        }
+        
+        .nft-image {
+            width: 100%;
+            height: 250px;
+            object-fit: cover;
+        }
+        
+        .nft-info {
+            padding: 1.2rem;
+        }
+        
+        .nft-title {
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .nft-description {
+            color: #a1a1a1;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+        
+        .nft-price {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 1rem;
+        }
+        
+        .price {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: var(--secondary);
+        }
+        
+        .buy-button {
+            background: linear-gradient(to right, var(--primary), var(--secondary));
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        
+        .buy-button:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+        }
+        
+        .network-info {
+            text-align: center;
+            margin-top: 1rem;
+            padding: 0.5rem;
+            background-color: rgba(78, 68, 206, 0.2);
+            border-radius: 5px;
+            font-size: 0.9rem;
+        }
+        
+        footer {
+            text-align: center;
+            padding: 2rem;
+            margin-top: 2rem;
+            color: #a1a1a1;
+            font-size: 0.9rem;
+        }
+        
+        @media (max-width: 768px) {
+            .nft-grid {
+                grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">
+            <img src="https://st.depositphotos.com/50978076/53902/i/450/depositphotos_539021516-stock-illustration-original-bored-ape-nft-art.jpg" alt="Ethereum Logo">
+            <span>GalaxiaNFT</span>
+        </div>
+        <button id="connectWallet" class="connect-wallet">Conectar Wallet</button>
+    </header>
+    
+    <main>
+        <h1>Descubre NFTs Únicos en la Red Sepolia</h1>
+        
+        <div class="network-info">
+            Red actual: <span id="networkName">No conectado</span> | 
+            Balance: <span id="walletBalance">0</span> ETH
+        </div>
+        
+        <div class="nft-grid">
+            <!-- NFT 1 -->
+            <div class="nft-card">
+                <img src="https://images6.alphacoders.com/112/1123556.png" alt="NFT 1" class="nft-image">
+                <div class="nft-info">
+                    <h3 class="nft-title">Galaxia #1</h3>
+                    <p class="nft-description">Una pieza única de arte digital que representa la vastedad del cosmos.</p>
+                    <div class="nft-price">
+                        <span class="price">0.05 ETH</span>
+                        <button class="buy-button" data-id="1">Comprar</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- NFT 2 -->
+            <div class="nft-card">
+                <img src="https://i.pinimg.com/736x/a5/ab/c5/a5abc504bf4dcc975c3f752b54d88333.jpg" alt="NFT 2" class="nft-image">
+                <div class="nft-info">
+                    <h3 class="nft-title">Ciber Punk #42</h3>
+                    <p class="nft-description">Edición limitada de la colección Ciber Punk 2023.</p>
+                    <div class="nft-price">
+                        <span class="price">0.1 ETH</span>
+                        <button class="buy-button" data-id="2">Comprar</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- NFT 3 -->
+            <div class="nft-card">
+                <img src="https://ipfs.io/ipfs/QmYx6GsYAKnNzZ9A6NvEKV9nf1VaDzJrqDR23Y8YSkebLU" alt="NFT 3" class="nft-image">
+                <div class="nft-info">
+                    <h3 class="nft-title">Dragon Legendario</h3>
+                    <p class="nft-description">El dragón mítico que guarda los secretos de la blockchain.</p>
+                    <div class="nft-price">
+                        <span class="price">0.25 ETH</span>
+                        <button class="buy-button" data-id="3">Comprar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <footer>
+        <p>Mercado NFT prueba - Mercado de NFTs en la red de prueba Sepolia</p>
+        <p>todo esta en la Red tesnet simplemente es una pagina de demostracion para mi portafolio</p>
+        <p>© 2023 Todos los derechos reservados. ETH de prueba solamente.</p>
+    </footer>
+
+    <script src="https://cdn.ethers.io/lib/ethers-5.2.umd.min.js"></script>
+    <script>
+        // Conexión con MetaMask
+        document.getElementById('connectWallet').addEventListener('click', async () => {
+            if (window.ethereum) {
+                try {
+                    // Solicitar acceso a la cuenta
+                    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    const account = accounts[0];
+                    
+                    // Actualizar UI
+                    document.getElementById('connectWallet').textContent = account.substring(0, 6) + '...' + account.substring(38);
+                    document.getElementById('connectWallet').classList.add('wallet-connected');
+                    
+                    // Obtener balance
+                    const provider = new ethers.providers.Web3Provider(window.ethereum);
+                    const balance = await provider.getBalance(account);
+                    const balanceInEth = ethers.utils.formatEther(balance);
+                    
+                    document.getElementById('walletBalance').textContent = parseFloat(balanceInEth).toFixed(4);
+                    
+                    // Obtener red
+                    const network = await provider.getNetwork();
+                    document.getElementById('networkName').textContent = network.name;
+                    
+                    // Escuchar cambios de cuenta
+                    window.ethereum.on('accountsChanged', (newAccounts) => {
+                        if (newAccounts.length === 0) {
+                            // Wallet desconectada
+                            document.getElementById('connectWallet').textContent = 'Conectar Wallet';
+                            document.getElementById('connectWallet').classList.remove('wallet-connected');
+                        } else {
+                            // Cuenta cambiada
+                            const newAccount = newAccounts[0];
+                            document.getElementById('connectWallet').textContent = newAccount.substring(0, 6) + '...' + newAccount.substring(38);
+                        }
+                    });
+                    
+                    // Escuchar cambios de red
+                    window.ethereum.on('chainChanged', () => {
+                        window.location.reload();
+                    });
+                    
+                } catch (error) {
+                    console.error("Error al conectar la wallet:", error);
+                }
+            } else {
+                alert('Por favor instala MetaMask para usar esta aplicación');
+            }
+        });
+        
+        // Funcionalidad de compra (simulada para este ejemplo)
+        document.querySelectorAll('.buy-button').forEach(button => {
+            button.addEventListener('click', async () => {
+                const nftId = button.getAttribute('data-id');
+                const nftPrice = button.parentElement.querySelector('.price').textContent;
+                
+                if (!document.getElementById('connectWallet').classList.contains('wallet-connected')) {
+                    alert('Por favor conecta tu wallet primero');
+                    return;
+                }
+                
+                // Aquí iría la lógica real de compra con el contrato
+                alert(`Compra simulada del NFT #${nftId} por ${nftPrice}\n\nEn una implementación real, esto interactuaría con tu contrato inteligente.`);
+            });
+        });
+    </script>
+</body>
+</html>
