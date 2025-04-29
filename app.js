@@ -1,92 +1,161 @@
 // 1. Configuración inicial segura
 console.log("Inicializando aplicación GalaxiaNFT...");
 
-// 2. Sistema de almacenamiento alternativo (para evitar errores en Vercel)
+// 2. Sistema de almacenamiento alternativo
 const appStorage = {
     _data: {},
-    getItem(key) {
-        return this._data[key] || null;
-    },
-    setItem(key, value) {
-        this._data[key] = value;
-    },
-    removeItem(key) {
-        delete this._data[key];
-    },
-    clear() {
-        this._data = {};
-    }
+    getItem(key) { return this._data[key] || null; },
+    setItem(key, value) { this._data[key] = value; }
 };
 
-// 3. Verificación segura de elementos del DOM
-function getSafeElement(id) {
-    const el = document.getElementById(id);
-    if (!el) console.warn(`Elemento no encontrado: ${id}`);
-    return el;
-}
-
-// 4. Elementos UI
+// 3. Elementos UI con verificación
 const ui = {
-    connectWalletBtn: getSafeElement('connectWallet'),
-    walletBalanceSpan: getSafeElement('walletBalance'),
-    networkNameSpan: getSafeElement('networkName'),
-    nftGrid: getSafeElement('nftGrid'),
-    mintForm: getSafeElement('mintForm'),
-    contractShort: getSafeElement('contractShort'),
-    nftName: getSafeElement('nftName'),
-    nftDescription: getSafeElement('nftDescription'),
-    nftImage: getSafeElement('nftImage'),
-    nftPrice: getSafeElement('nftPrice')
+    connectWalletBtn: document.getElementById('connectWallet'),
+    walletBalanceSpan: document.getElementById('walletBalance'),
+    networkNameSpan: document.getElementById('networkName'),
+    nftGrid: document.getElementById('nftGrid'),
+    mintForm: document.getElementById('mintForm')
 };
 
-// 5. Variables de estado
+// 4. Variables de estado
 let nftContract = null;
 let provider = null;
 let signer = null;
 let userAddress = null;
 
-// 6. Configuración de Sepolia
-const SEPOLIA_CONFIG = {
-    chainId: '0xaa36a7', // 11155111
-    chainName: 'Sepolia Testnet',
-    nativeCurrency: {
-        name: 'ETH',
-        symbol: 'ETH',
-        decimals: 18
-    },
-    rpcUrls: ['https://rpc.sepolia.org'],
-    blockExplorerUrls: ['https://sepolia.etherscan.io']
-};
-
-// 7. Función para mostrar errores
+// 5. Función para mostrar errores
 function showError(message) {
     console.error(message);
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'alert alert-danger position-fixed top-0 end-0 m-3';
+    errorDiv.style.zIndex = '1100';
+    errorDiv.innerHTML = `
+        <i class="fas fa-exclamation-circle me-2"></i>
+        ${message}
+        <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+    `;
+    document.body.appendChild(errorDiv);
+    setTimeout(() => errorDiv.remove(), 5000);
+}
+
+// 6. Función para conectar wallet (versión simplificada y segura)
+async function connectWallet() {
+    if (!window.ethereum) {
+        showError('Por favor instala MetaMask');
+        return false;
+    }
+
     try {
-        // Eliminar errores previos
-        document.querySelectorAll('.custom-error').forEach(el => el.remove());
-        
-        // Crear nuevo mensaje
-        const alertDiv = document.createElement('div');
-        alertDiv.className = 'custom-error alert alert-danger position-fixed top-0 end-0 m-3';
-        alertDiv.style.zIndex = '1100';
-        alertDiv.innerHTML = `
-            <i class="fas fa-exclamation-circle me-2"></i>
-            ${message}
-            <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
-        `;
-        document.body.appendChild(alertDiv);
-        
-        // Auto-eliminar después de 5 segundos
-        setTimeout(() => alertDiv.remove(), 5000);
-    } catch (e) {
-        console.error("Error mostrando mensaje de error:", e);
+        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        if (!accounts || accounts.length === 0) {
+            throw new Error('No se obtuvieron cuentas');
+        }
+
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        signer = provider.getSigner();
+        userAddress = accounts[0];
+
+        // Crear instancia del contrato sin verificación inicial
+        nftContract = new ethers.Contract(contractAddress, contractABI, signer);
+
+        // Verificar métodos dinámicamente
+        try {
+            // Intenta llamar a tokenCounter para verificar
+            await nftContract.tokenCounter();
+        } catch (e) {
+            throw new Error('El contrato no responde correctamente. Verifica el ABI y la dirección.');
+        }
+
+        // Si pasa la verificación, cargar NFTs
+        await loadNFTs();
+        return true;
+
+    } catch (error) {
+        console.error('Error conectando wallet:', error);
+        showError(error.message);
+        return false;
     }
 }
 
-// 8. Función para acortar direcciones
-function shortenAddress(address) {
-    return address ? `${address.substring(0, 6)}...${address.substring(address.length - 4)}` : '';
+// 7. Función para cargar NFTs (con manejo de errores mejorado)
+async function loadNFTs() {
+    if (!nftContract || !ui.nftGrid) return;
+
+    try {
+        ui.nftGrid.innerHTML = `<div class="spinner-border text-primary" role="status"></div>`;
+
+        // Obtener el total de NFTs (con fallback si tokenCounter no existe)
+        let totalSupply = 0;
+        try {
+            totalSupply = await nftContract.tokenCounter();
+        } catch (e) {
+            console.warn("Método tokenCounter no encontrado, intentando alternativa...");
+            // Intenta con otro método si tokenCounter no existe
+            totalSupply = await nftContract.totalSupply();
+        }
+
+        console.log(`Total NFTs: ${totalSupply}`);
+
+        const nfts = [];
+        for (let i = 1; i <= totalSupply; i++) {
+            try {
+                const nftDetails = await nftContract.getNFTDetails(i);
+                const metadata = await fetch(nftDetails.metadataURI).then(res => res.json());
+                
+                nfts.push({
+                    id: i,
+                    name: metadata.name || `NFT #${i}`,
+                    image: metadata.image || 'placeholder.jpg',
+                    price: ethers.utils.formatEther(nftDetails.price),
+                    owner: nftDetails.owner
+                });
+            } catch (error) {
+                console.warn(`Error cargando NFT ${i}:`, error);
+            }
+        }
+
+        renderNFTs(nfts);
+
+    } catch (error) {
+        console.error("Error cargando NFTs:", error);
+        showError("Error al cargar NFTs");
+        ui.nftGrid.innerHTML = `
+            <div class="alert alert-danger">
+                Error al cargar NFTs. <button onclick="location.reload()">Reintentar</button>
+            </div>
+        `;
+    }
 }
+
+// 8. Inicialización de la aplicación
+async function initApp() {
+    // Verificar ethers.js
+    if (typeof ethers === 'undefined') {
+        showError('Error: ethers.js no está cargado');
+        return;
+    }
+
+    // Configurar event listeners
+    if (ui.connectWalletBtn) {
+        ui.connectWalletBtn.addEventListener('click', connectWallet);
+    }
+
+    // Conexión automática si hay wallet conectada
+    if (window.ethereum) {
+        const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+        if (accounts.length > 0) {
+            await connectWallet();
+        }
+    }
+}
+
+// Iniciar la aplicación
+if (document.readyState === 'complete') {
+    initApp();
+} else {
+    document.addEventListener('DOMContentLoaded', initApp);
+}
+
 
 // 9. Función para conectar wallet (versión mejorada)
 async function connectWallet() {

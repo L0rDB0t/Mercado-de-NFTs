@@ -109,6 +109,30 @@
     <div class="modal fade" id="nftModal" tabindex="-1" aria-hidden="true">
         <!-- ... contenido del modal ... -->
     </div>
+    // Tu contrato debe incluir estos métodos
+function tokenCounter() public view returns (uint256) {
+    return _tokenIds.current(); // Si usas Counters de OpenZeppelin
+}
+
+function getNFTDetails(uint256 tokenId) public view returns (
+    address owner,
+    string memory metadataURI,
+    uint256 price,
+    bool forSale
+) {
+    // Implementación
+}
+
+function buyNFT(uint256 tokenId) public payable {
+    // Implementación
+}
+
+function mintNFT(
+    string memory tokenURI, 
+    uint256 price
+) public payable returns (uint256) {
+    // Implementación
+}
 
     <!-- Footer -->
     <footer>
