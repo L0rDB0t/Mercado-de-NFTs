@@ -1,4 +1,4 @@
-🌌 GalaxiaNFT Marketplace
+###🌌 GalaxiaNFT Marketplace
 ¡Explora el universo de los NFTs en la blockchain!
 
 🚀 Demo en Vivo
