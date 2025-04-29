@@ -1,39 +1,56 @@
-// 1. Configuración inicial
-const isVercel = window.location.hostname.includes('vercel.app');
+// 1. Configuración inicial segura
+console.log("Inicializando aplicación...");
 
-// 2. Funciones básicas
-function shortenAddress(address) {
-    return address ? `${address.substring(0, 6)}...${address.substring(address.length - 4)}` : '';
-}
-
-function showError(message) {
-    console.error(message);
-    const errorDiv = document.createElement('div');
-    errorDiv.className = 'alert alert-danger position-fixed top-0 end-0 m-3';
-    errorDiv.style.zIndex = '1100';
-    errorDiv.innerHTML = `
-        <i class="fas fa-exclamation-circle me-2"></i>
-        ${message}
-        <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
-    `;
-    document.body.appendChild(errorDiv);
-    setTimeout(() => errorDiv.remove(), 5000);
-}
-
-// 3. Elementos UI
-const ui = {
-    connectWalletBtn: document.getElementById('connectWallet'),
-    walletBalanceSpan: document.getElementById('walletBalance'),
-    networkNameSpan: document.getElementById('networkName'),
-    nftGrid: document.getElementById('nftGrid'),
-    mintForm: document.getElementById('mintForm'),
-    contractShort: document.getElementById('contractShort')
+// 2. Polyfill para localStorage en Vercel
+const safeStorage = {
+    getItem: (key) => {
+        try {
+            return localStorage.getItem(key);
+        } catch (e) {
+            console.warn("Acceso a localStorage bloqueado, usando memoria");
+            return this.memory[key] || null;
+        }
+    },
+    setItem: (key, value) => {
+        try {
+            localStorage.setItem(key, value);
+        } catch (e) {
+            console.warn("Acceso a localStorage bloqueado, usando memoria");
+            this.memory = this.memory || {};
+            this.memory[key] = value;
+        }
+    },
+    memory: {}
 };
 
-// 4. Variables de estado
-let nftContract, provider, signer, userAddress;
+// 3. Verificación de elementos del DOM
+function getElement(id) {
+    const el = document.getElementById(id);
+    if (!el) console.error(`Elemento no encontrado: ${id}`);
+    return el;
+}
 
-// 5. Configuración de Sepolia
+// 4. Elementos UI
+const ui = {
+    connectWalletBtn: getElement('connectWallet'),
+    walletBalanceSpan: getElement('walletBalance'),
+    networkNameSpan: getElement('networkName'),
+    nftGrid: getElement('nftGrid'),
+    mintForm: getElement('mintForm'),
+    contractShort: getElement('contractShort'),
+    nftName: getElement('nftName'),
+    nftDescription: getElement('nftDescription'),
+    nftImage: getElement('nftImage'),
+    nftPrice: getElement('nftPrice')
+};
+
+// 5. Variables de estado
+let nftContract = null;
+let provider = null;
+let signer = null;
+let userAddress = null;
+
+// 6. Configuración de Sepolia
 const SEPOLIA_CONFIG = {
     chainId: '0xaa36a7',
     chainName: 'Sepolia Testnet',
@@ -46,10 +63,48 @@ const SEPOLIA_CONFIG = {
     blockExplorerUrls: ['https://sepolia.etherscan.io']
 };
 
-// 6. Función mejorada para cargar NFTs
+// 7. Función para mostrar errores
+function showError(message) {
+    console.error(message);
+    try {
+        // Eliminar errores previos
+        const existingAlerts = document.querySelectorAll('.custom-error');
+        existingAlerts.forEach(el => el.remove());
+        
+        // Crear nuevo mensaje
+        const alertDiv = document.createElement('div');
+        alertDiv.className = 'custom-error alert alert-danger position-fixed top-0 end-0 m-3';
+        alertDiv.style.zIndex = '1100';
+        alertDiv.innerHTML = `
+            <i class="fas fa-exclamation-circle me-2"></i>
+            ${message}
+            <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+        `;
+        document.body.appendChild(alertDiv);
+        
+        // Auto-eliminar después de 5 segundos
+        setTimeout(() => alertDiv.remove(), 5000);
+    } catch (e) {
+        console.error("Error mostrando mensaje de error:", e);
+    }
+}
+
+// 8. Función para acortar direcciones
+function shortenAddress(address) {
+    return address ? `${address.substring(0, 6)}...${address.substring(address.length - 4)}` : '';
+}
+
+// 9. Función para cargar NFTs (versión mejorada)
 async function loadNFTs() {
-    if (!nftContract || !ui.nftGrid) {
-        console.error('Contrato no inicializado o elemento nftGrid no encontrado');
+    console.log("Cargando NFTs...");
+    
+    if (!nftContract) {
+        showError("Contrato no inicializado");
+        return;
+    }
+
+    if (!ui.nftGrid) {
+        showError("Elemento nftGrid no encontrado");
         return;
     }
 
@@ -64,23 +119,33 @@ async function loadNFTs() {
             </div>
         `;
 
-        // Obtener el contador de tokens
-        const totalSupply = await nftContract.tokenCounter();
-        console.log(`Total de NFTs en contrato: ${totalSupply}`);
+        // Verificar que tokenCounter existe
+        if (!nftContract.tokenCounter) {
+            throw new Error("El método tokenCounter no está disponible en el contrato");
+        }
 
-        // Cargar detalles de cada NFT
+        const totalSupply = await nftContract.tokenCounter();
+        console.log(`Total de NFTs: ${totalSupply}`);
+
         const nfts = [];
         for (let i = 1; i <= totalSupply; i++) {
             try {
+                // Verificar que getNFTDetails existe
+                if (!nftContract.getNFTDetails) {
+                    throw new Error("El método getNFTDetails no está disponible en el contrato");
+                }
+
                 const nftDetails = await nftContract.getNFTDetails(i);
-                console.log(`Detalles NFT ${i}:`, nftDetails);
+                console.log(`NFT ${i} detalles:`, nftDetails);
 
                 // Obtener metadatos
                 let metadata = {};
                 try {
+                    if (!nftDetails.metadataURI) {
+                        throw new Error("metadataURI no definido");
+                    }
                     const response = await fetch(nftDetails.metadataURI);
                     metadata = await response.json();
-                    console.log(`Metadatos NFT ${i}:`, metadata);
                 } catch (error) {
                     console.warn(`Error cargando metadatos NFT ${i}:`, error);
                     metadata = {
@@ -102,15 +167,15 @@ async function loadNFTs() {
 
             } catch (error) {
                 console.error(`Error procesando NFT ${i}:`, error);
+                showError(`Error cargando NFT ${i}`);
             }
         }
 
-        // Renderizar NFTs
         renderNFTs(nfts);
 
     } catch (error) {
-        console.error('Error general cargando NFTs:', error);
-        showError('Error al cargar NFTs. Por favor recarga la página');
+        console.error("Error cargando NFTs:", error);
+        showError("Error al cargar NFTs: " + error.message);
         ui.nftGrid.innerHTML = `
             <div class="col-12 text-center py-5">
                 <i class="fas fa-exclamation-triangle fa-3x text-danger mb-3"></i>
@@ -123,9 +188,14 @@ async function loadNFTs() {
     }
 }
 
-// 7. Función para renderizar NFTs
+// 10. Función para renderizar NFTs
 function renderNFTs(nfts) {
-    if (!ui.nftGrid) return;
+    console.log("Renderizando NFTs...");
+    
+    if (!ui.nftGrid) {
+        showError("Elemento nftGrid no encontrado");
+        return;
+    }
 
     if (!nfts || nfts.length === 0) {
         ui.nftGrid.innerHTML = `
@@ -138,59 +208,66 @@ function renderNFTs(nfts) {
         return;
     }
 
-    ui.nftGrid.innerHTML = nfts.map(nft => `
-        <div class="col-md-4 col-lg-3 mb-4">
-            <div class="nft-card h-100">
-                <img src="${nft.image}" alt="${nft.name}" class="nft-img" 
-                     onerror="this.src='https://via.placeholder.com/300'">
-                <div class="p-3 d-flex flex-column h-100">
-                    <h5 class="mb-2">${nft.name}</h5>
-                    <p class="text-muted flex-grow-1">${nft.description.substring(0, 100)}${nft.description.length > 100 ? '...' : ''}</p>
-                    <div class="mt-auto">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span class="price-tag">${parseFloat(nft.price).toFixed(3)} ETH</span>
-                            ${nft.forSale ? 
-                                `<button class="btn btn-sm btn-primary buy-btn" data-id="${nft.id}">
-                                    <i class="fas fa-shopping-cart me-1"></i> Comprar
-                                </button>` : 
-                                `<span class="badge bg-secondary">Vendido</span>`
-                            }
+    try {
+        ui.nftGrid.innerHTML = nfts.map(nft => `
+            <div class="col-md-4 col-lg-3 mb-4">
+                <div class="nft-card h-100">
+                    <img src="${nft.image}" alt="${nft.name}" class="nft-img" 
+                         onerror="this.src='https://via.placeholder.com/300'">
+                    <div class="p-3 d-flex flex-column h-100">
+                        <h5 class="mb-2">${nft.name}</h5>
+                        <p class="text-muted flex-grow-1">${nft.description.substring(0, 100)}${nft.description.length > 100 ? '...' : ''}</p>
+                        <div class="mt-auto">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="price-tag">${parseFloat(nft.price).toFixed(3)} ETH</span>
+                                ${nft.forSale ? 
+                                    `<button class="btn btn-sm btn-primary buy-btn" data-id="${nft.id}">
+                                        <i class="fas fa-shopping-cart me-1"></i> Comprar
+                                    </button>` : 
+                                    `<span class="badge bg-secondary">Vendido</span>`
+                                }
+                            </div>
+                            <small class="text-muted d-block">
+                                <i class="fas fa-user me-1"></i>${shortenAddress(nft.owner)}
+                            </small>
                         </div>
-                        <small class="text-muted d-block">
-                            <i class="fas fa-user me-1"></i>${shortenAddress(nft.owner)}
-                        </small>
                     </div>
                 </div>
             </div>
-        </div>
-    `).join('');
+        `).join('');
 
-    // Agregar event listeners a los botones de compra
-    document.querySelectorAll('.buy-btn').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-            e.preventDefault();
-            const tokenId = btn.getAttribute('data-id');
-            const nft = nfts.find(n => n.id == tokenId);
-            if (nft) {
-                try {
-                    await buyNFT(nft.id, nft.price);
-                } catch (error) {
-                    showError(`Error al comprar NFT: ${error.message}`);
+        // Agregar event listeners
+        document.querySelectorAll('.buy-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const tokenId = btn.getAttribute('data-id');
+                const nft = nfts.find(n => n.id == tokenId);
+                if (nft) {
+                    try {
+                        await buyNFT(nft.id, nft.price);
+                    } catch (error) {
+                        showError(`Error al comprar NFT: ${error.message}`);
+                    }
                 }
-            }
+            });
         });
-    });
+
+    } catch (error) {
+        console.error("Error renderizando NFTs:", error);
+        showError("Error al mostrar NFTs");
+    }
 }
 
-// 8. Función para conectar wallet
+// 11. Función para conectar wallet
 async function connectWallet() {
+    console.log("Conectando wallet...");
+    
     if (!window.ethereum) {
         showError('Por favor instala MetaMask');
         return false;
     }
 
     try {
-        // Solicitar conexión
         const accounts = await window.ethereum.request({ 
             method: 'eth_requestAccounts' 
         });
@@ -199,13 +276,22 @@ async function connectWallet() {
             throw new Error('No se obtuvieron cuentas');
         }
 
-        // Configurar provider y contrato
         provider = new ethers.providers.Web3Provider(window.ethereum);
         signer = provider.getSigner();
         userAddress = accounts[0];
+        
+        // Verificar que contractAddress y ABI están definidos
+        if (typeof contractAddress === 'undefined' || typeof contractABI === 'undefined') {
+            throw new Error('Configuración del contrato no encontrada');
+        }
+
         nftContract = new ethers.Contract(contractAddress, contractABI, signer);
 
-        // Actualizar UI
+        // Verificar métodos del contrato
+        if (!nftContract.tokenCounter || !nftContract.getNFTDetails) {
+            throw new Error('El contrato no tiene los métodos requeridos');
+        }
+
         updateWalletUI();
         await updateNetworkInfo();
         await loadNFTs();
@@ -218,26 +304,30 @@ async function connectWallet() {
     }
 }
 
-// 9. Función para actualizar la UI de la wallet
+// 12. Función para actualizar UI de wallet
 function updateWalletUI() {
     if (!ui.connectWalletBtn) return;
 
-    if (userAddress) {
-        ui.connectWalletBtn.innerHTML = `
-            <i class="fas fa-check-circle me-2"></i>
-            ${shortenAddress(userAddress)}
-        `;
-        ui.connectWalletBtn.classList.add('connected');
-    } else {
-        ui.connectWalletBtn.innerHTML = `
-            <i class="fas fa-wallet me-2"></i>
-            Conectar Wallet
-        `;
-        ui.connectWalletBtn.classList.remove('connected');
+    try {
+        if (userAddress) {
+            ui.connectWalletBtn.innerHTML = `
+                <i class="fas fa-check-circle me-2"></i>
+                ${shortenAddress(userAddress)}
+            `;
+            ui.connectWalletBtn.classList.add('connected');
+        } else {
+            ui.connectWalletBtn.innerHTML = `
+                <i class="fas fa-wallet me-2"></i>
+                Conectar Wallet
+            `;
+            ui.connectWalletBtn.classList.remove('connected');
+        }
+    } catch (error) {
+        console.error("Error actualizando UI de wallet:", error);
     }
 }
 
-// 10. Función para actualizar información de red
+// 13. Función para actualizar info de red
 async function updateNetworkInfo() {
     if (!provider || !userAddress || !ui.walletBalanceSpan || !ui.networkNameSpan) return;
     
@@ -254,25 +344,50 @@ async function updateNetworkInfo() {
     }
 }
 
-// 11. Inicialización
-async function init() {
+// 14. Función para comprar NFT
+async function buyNFT(tokenId, price) {
+    console.log(`Comprando NFT ${tokenId}...`);
+    
+    if (!userAddress) {
+        showError("Conecta tu wallet primero");
+        return;
+    }
+
+    if (!nftContract || !nftContract.buyNFT) {
+        showError("El contrato no tiene el método buyNFT");
+        return;
+    }
+
+    try {
+        const tx = await nftContract.buyNFT(tokenId, {
+            value: ethers.utils.parseEther(price)
+        });
+        
+        await tx.wait();
+        showError("¡Compra exitosa!");
+        await loadNFTs();
+    } catch (error) {
+        console.error("Error comprando NFT:", error);
+        showError(`Error al comprar: ${error.reason || error.message}`);
+    }
+}
+
+// 15. Inicialización de la aplicación
+async function initApp() {
+    console.log("Inicializando aplicación...");
+    
     try {
         // Verificar dependencias
         if (typeof ethers === 'undefined') {
             throw new Error('ethers.js no está cargado');
         }
 
-        // Verificar configuración del contrato
-        if (typeof contractAddress === 'undefined' || typeof contractABI === 'undefined') {
-            throw new Error('Configuración del contrato no encontrada');
-        }
-
-        // Mostrar dirección abreviada del contrato
-        if (ui.contractShort) {
+        // Mostrar dirección del contrato
+        if (ui.contractShort && typeof contractAddress !== 'undefined') {
             ui.contractShort.textContent = shortenAddress(contractAddress);
         }
 
-        // Configurar listeners de eventos
+        // Configurar listeners
         if (ui.connectWalletBtn) {
             ui.connectWalletBtn.addEventListener('click', connectWallet);
         }
@@ -280,31 +395,28 @@ async function init() {
         if (ui.mintForm) {
             ui.mintForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
+                
                 if (!userAddress) {
                     showError("Conecta tu wallet primero");
                     return;
                 }
 
-                const name = document.getElementById('nftName').value;
-                const description = document.getElementById('nftDescription').value;
-                const imageUrl = document.getElementById('nftImage').value;
-                const price = document.getElementById('nftPrice').value;
+                if (!nftContract || !nftContract.mintNFT) {
+                    showError("El contrato no tiene el método mintNFT");
+                    return;
+                }
+
+                const name = ui.nftName?.value;
+                const description = ui.nftDescription?.value;
+                const imageUrl = ui.nftImage?.value;
+                const price = ui.nftPrice?.value;
+
+                if (!name || !description || !imageUrl || !price) {
+                    showError("Por favor completa todos los campos");
+                    return;
+                }
 
                 try {
-                    // Mostrar modal de transacción
-                    const modal = new bootstrap.Modal('#transactionModal');
-                    const modalBody = document.querySelector('#transactionModal .modal-body');
-                    modalBody.innerHTML = `
-                        <div class="text-center">
-                            <div class="spinner-border text-primary mb-3" role="status">
-                                <span class="visually-hidden">Cargando...</span>
-                            </div>
-                            <h5>Creando NFT...</h5>
-                        </div>
-                    `;
-                    modal.show();
-
-                    // Crear NFT
                     const tokenURI = JSON.stringify({ name, description, image: imageUrl });
                     const tx = await nftContract.mintNFT(
                         tokenURI, 
@@ -313,26 +425,9 @@ async function init() {
                     );
 
                     await tx.wait();
-
-                    // Mostrar éxito
-                    modalBody.innerHTML = `
-                        <div class="text-center">
-                            <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
-                            <h5>¡NFT creado exitosamente!</h5>
-                            <a href="https://sepolia.etherscan.io/tx/${tx.hash}" 
-                               target="_blank" class="text-decoration-none">
-                                Ver transacción
-                            </a>
-                        </div>
-                    `;
-
-                    // Limpiar formulario y recargar NFTs
+                    showError("¡NFT creado exitosamente!");
                     ui.mintForm.reset();
-                    setTimeout(async () => {
-                        modal.hide();
-                        await loadNFTs();
-                    }, 2000);
-
+                    await loadNFTs();
                 } catch (error) {
                     console.error("Error creando NFT:", error);
                     showError(`Error al crear NFT: ${error.reason || error.message}`);
@@ -347,28 +442,31 @@ async function init() {
                 provider = new ethers.providers.Web3Provider(window.ethereum);
                 signer = provider.getSigner();
                 userAddress = accounts[0];
-                nftContract = new ethers.Contract(contractAddress, contractABI, signer);
                 
-                updateWalletUI();
-                await updateNetworkInfo();
-                await loadNFTs();
+                if (typeof contractAddress !== 'undefined' && typeof contractABI !== 'undefined') {
+                    nftContract = new ethers.Contract(contractAddress, contractABI, signer);
+                    
+                    updateWalletUI();
+                    await updateNetworkInfo();
+                    await loadNFTs();
+                }
             }
         }
 
     } catch (error) {
-        console.error('Error inicializando:', error);
-        showError('Error al iniciar la aplicación: ' + error.message);
+        console.error('Error inicializando aplicación:', error);
+        showError('Error al iniciar: ' + error.message);
     }
 }
 
-// 12. Iniciar aplicación cuando el DOM esté listo
+// 16. Iniciar aplicación
 if (document.readyState === 'complete') {
-    init();
+    initApp();
 } else {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', initApp);
 }
 
-// 13. Escuchadores de eventos de MetaMask
+// 17. Escuchadores de eventos de MetaMask
 if (window.ethereum) {
     window.ethereum.on('accountsChanged', (accounts) => {
         userAddress = accounts[0] || null;
