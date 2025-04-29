@@ -1,8 +1,6 @@
 🌌 GalaxiaNFT Marketplace
 ¡Explora el universo de los NFTs en la blockchain!
 
-<!-- Opcional: agrega un banner si tienes uno -->
-
 🚀 Demo en Vivo
 👉 Visitar GalaxiaNFT Marketplace
 
@@ -61,7 +59,7 @@ Red Blockchain: Sepolia Testnet
 
 Contrato inteligente: 0x6aa8d26ecc5f79261f1c4b2de4a6510ac945424d
 
-Explora el contrato: Ver en Etherscan
+Explorador: Ver en Etherscan
 
 🛸 Roadmap Futuro
 ✅ Sistema de compra y minting de NFTs
@@ -77,7 +75,7 @@ Explora el contrato: Ver en Etherscan
 👽 Contribuciones Intergalácticas
 ¡Las contribuciones son muy bienvenidas! 🚀
 
-Haz un fork del repositorio
+Haz un fork del repositorio.
 
 Crea tu rama:
 
@@ -85,7 +83,7 @@ bash
 Copiar
 Editar
 git checkout -b feature/nueva-funcionalidad
-Haz tus cambios y commitea:
+Realiza tus cambios y haz commit:
 
 bash
 Copiar
@@ -97,21 +95,10 @@ bash
 Copiar
 Editar
 git push origin feature/nueva-funcionalidad
-Abre un Pull Request
+Abre un Pull Request 🚀
 
 📜 Licencia
 Este proyecto está bajo la licencia MIT. Consulta el archivo LICENSE para más información.
 
 🚀 ¿Listo para explorar el universo NFT?
 👉 ¡Lánzate a GalaxiaNFT!
-
-¿Quieres que también te genere el banner.jpg para que tu README luzca aún más pro? 🚀🎨
-(¡Te lo puedo hacer ahora mismo si quieres!)
-
-
-
-
-
-
-
-
